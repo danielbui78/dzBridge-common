@@ -3257,6 +3257,13 @@ void DzBridgeAction::writeHeadTailData(DzNode* Node, DzJsonWriter& writer)
 
 	// get skeleton and initial bone list
 	DzSkeleton* pSkeleton = Node->getSkeleton();
+	if (pSkeleton == nullptr)
+	{
+		writer.startMemberObject("HeadTailData", true);
+		writer.finishObject();
+		return;
+	}
+
 	QObjectList aBoneList = pSkeleton->getAllBones();
 	// Create boneName Lookup
 	QMap<QString, bool> aBoneNameLookup;
@@ -3449,6 +3456,9 @@ DzBoneList DzBridgeAction::getAllBones(DzNode* Node)
 
 	// get skeleton and initial bone list
 	DzSkeleton* pSkeleton = Node->getSkeleton();
+	if (pSkeleton == nullptr)
+		return aBoneList;
+
 	QObjectList oBoneList = pSkeleton->getAllBones();
 	// Create boneName Lookup
 	QMap<QString, bool> aBoneNameLookup;
