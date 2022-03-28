@@ -1966,6 +1966,16 @@ void writeCameras(DzJsonWriter& writer, DzNode * Node)
 	DzNode *tonemapper = nullptr;
 	DzRenderOptions *renderoptions = nullptr;
 	tonemapper = dzScene->findNode("Tonemapper Options");
+	if (tonemapper == nullptr) {
+		DzNodeListIterator nodeListIterator = dzScene->nodeListIterator();
+		while (nodeListIterator.hasNext())
+		{
+			DzNode* tempNode = nodeListIterator.next();
+			if (tempNode->inherits("DzTonemapperNode")) {
+				tonemapper = tempNode;
+			}
+		}
+	}
 	if (tonemapper && !tonemapper->isHidden())
 	{
 		// If "Tone Mapping Enable" property does not exist, then default to true
@@ -2013,7 +2023,11 @@ void writeCameras(DzJsonWriter& writer, DzNode * Node)
 
 	writer.startMemberArray("Cameras", true);
 	// Get Selected Cameras
+#if FALSE
 	DzCameraListIterator cameraListIter = dzScene->selectedCameraListIterator();
+#else
+	DzCameraListIterator cameraListIter = dzScene->cameraListIterator();
+#endif
 	while (cameraListIter.hasNext())
 	{
 		DzCamera* camera = cameraListIter.next();
@@ -2023,9 +2037,16 @@ void writeCameras(DzJsonWriter& writer, DzNode * Node)
 			QString cameraName = camera->getName();
 			QString cameraLabel = camera->getLabel();
 			DzVec3 position = camera->getWSPos();
-			DzQuat rotation = camera->getWSRot();
+			DzQuat quaternion = camera->getWSRot();
+			DzVec3 rotation;
+			quaternion.getValue(DzRotationOrder::XYZ, rotation);
+			rotation = rotation * 180 / 3.14159265358979323846;
 			DzVec3 target = camera->getFocalPoint();
 			double fov = camera->getFieldOfView();
+			fov = fov * 180 / 3.14159265358979323846;
+			double focalDistance = camera->getFocalDistance();
+			double focalLength = camera->getFocalLength();
+			double camera_aspectRatio = camera->getAspectRatio();
 
 			writer.startObject();
 			writer.addMember("Name", cameraName);
@@ -2034,11 +2055,16 @@ void writeCameras(DzJsonWriter& writer, DzNode * Node)
 			writer.addItem(position.m_y);
 			writer.addItem(position.m_z);
 			writer.finishArray();
-			writer.startMemberArray("Rotation", false);
+			writer.startMemberArray("Euler Rotation", false);
 			writer.addItem(rotation.m_x);
 			writer.addItem(rotation.m_y);
 			writer.addItem(rotation.m_z);
-			writer.addItem(rotation.m_w);
+			writer.finishArray();
+			writer.startMemberArray("Quaternion", false);
+			writer.addItem(quaternion.m_x);
+			writer.addItem(quaternion.m_y);
+			writer.addItem(quaternion.m_z);
+			writer.addItem(quaternion.m_w);
 			writer.finishArray();
 			writer.startMemberArray("Look At", false);
 			writer.addItem(target.m_x);
@@ -2046,15 +2072,19 @@ void writeCameras(DzJsonWriter& writer, DzNode * Node)
 			writer.addItem(target.m_z);
 			writer.finishArray();
 			writer.addMember("FOV", fov);
+			writer.addMember("Focal Distance", focalDistance);
+			writer.addMember("Focal Length", focalLength);
+			writer.addMember("Camera Aspect Ratio", camera_aspectRatio);
 
 			// Part of ToneMapper Options Node
 			writer.addMember("Film ISO", tonemapper_iso);
 			writer.addMember("Shutter Speed", tonemapper_shutterspeed);
 			writer.addMember("Aperture", tonemapper_aperture);
 			writer.addMember("Gamma", tonemapper_gamma);
+//			writer.addMember("ToneMapper Class", tonemapper->className());
 
 			// Aspect Ratio and Dimensions need DzRenderOptions
-			writer.addMember("Aspect Ratio (W/H)", image_aspectRatio);
+			writer.addMember("Image Aspect Ratio (W/H)", image_aspectRatio);
 			writer.addMember("Image Width", image_width);
 			writer.addMember("Image Height", image_height);
 
@@ -2071,18 +2101,30 @@ void writeLights(DzJsonWriter& writer, DzNode* Node)
 	if (Node == nullptr)
 		return;
 
-	QString hdri_filename = "";
+	QString hdri_imagemap_filename = "";
+	double hdri_imagemap_strength = 0;
 	double hdri_intensity = 0;
 	double hdri_rotation = 0;
+	bool bDrawDome = false;
+	QString environment_mode_string = "";
 
 	// Retrieve DazStudio Render (Iray) Settings
 	DzNode* environment = nullptr;
 	environment = dzScene->findNode("Environment Options");
+	if (environment == nullptr) {
+		DzNodeListIterator nodeListIterator = dzScene->nodeListIterator();
+		while (nodeListIterator.hasNext())
+		{
+			DzNode* tempNode = nodeListIterator.next();
+			if (tempNode->inherits("DzEnvironmentNode")) {
+				environment = tempNode;
+			}
+		}
+	}
 	if (environment && !environment->isHidden())
 	{
 		// check environment mode: "Environment Mode"
 		enum { dome_and_scene, dome_only, sun_sky_only, scene_only } environment_mode_enum = dome_and_scene;
-		QString environment_mode_string = "";
 		DzProperty* tempProperty = environment->findProperty("Environment Mode");
 		DzEnumProperty* environment_mode_property = qobject_cast<DzEnumProperty*>(tempProperty);
 		if (environment_mode_property) {
@@ -2095,12 +2137,18 @@ void writeLights(DzJsonWriter& writer, DzNode* Node)
 
 		if (environment_mode_enum == dome_and_scene || environment_mode_enum == dome_only)
 		{
+			tempProperty = environment->findProperty("Draw Dome", false);
+			DzIntProperty* intProperty = qobject_cast<DzIntProperty*>(tempProperty);
+			if (intProperty) {
+				bDrawDome = intProperty->getValue();
+			}
 			tempProperty = environment->findProperty("Environment Map", false);
 			DzNumericProperty* numericProperty = qobject_cast<DzNumericProperty*>(tempProperty);
 			if (numericProperty) {
+				hdri_imagemap_strength = numericProperty->getDoubleValue();
 				auto texture = numericProperty->getMapValue();
 				if (texture) {
-					hdri_filename = texture->getFilename();
+					hdri_imagemap_filename = texture->getFilename();
 				}
 			}
 			tempProperty = environment->findProperty("Environment Intensity", false);
@@ -2118,14 +2166,26 @@ void writeLights(DzJsonWriter& writer, DzNode* Node)
 
 	writer.startMemberArray("Lights", true);
 
-	writer.startObject();
-	writer.addMember("Name", QString("Sky Dome"));
-	writer.addMember("HDRI File", hdri_filename);
-	writer.addMember("Intensity", hdri_intensity);
-	writer.addMember("Rotation", hdri_rotation);
-	writer.finishObject(); // Sky Dome
+	if (environment)
+	{
+		writer.startObject();
+		writer.addMember("Name", environment->getName());
+		writer.addMember("Label", environment->getLabel());
+//		writer.addMember("Class", environment->className());
+		writer.addMember("HDRI File", hdri_imagemap_filename);
+		writer.addMember("HDRI Strength", hdri_imagemap_strength);
+		writer.addMember("Intensity", hdri_intensity);
+		writer.addMember("Rotation", hdri_rotation);
+		writer.addMember("Draw Dome", bDrawDome);
+		writer.addMember("Dome Mode", environment_mode_string);
+		writer.finishObject(); // Sky Dome
+	}
 
+#if FALSE
 	DzLightListIterator lightListIterator = dzScene->selectedLightListIterator();
+#else
+	DzLightListIterator lightListIterator = dzScene->lightListIterator();
+#endif
 	while (lightListIterator.hasNext())
 	{
 		DzLight* light = lightListIterator.next();
@@ -3463,6 +3523,7 @@ DzBoneList DzBridgeAction::getAllBones(DzNode* Node)
 		return aBoneList;
 
 	QObjectList oBoneList = pSkeleton->getAllBones();
+
 	// Create boneName Lookup
 	QMap<QString, bool> aBoneNameLookup;
 	for (auto item : oBoneList)
