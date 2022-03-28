@@ -1128,6 +1128,9 @@ void DzBridgeAction::getScenePropList(DzNode* Node, QMap<QString, DzNode*>& Type
 	if (Node == nullptr)
 		return;
 
+	if (Node->inherits("DzBone"))
+		return;
+
 	DzObject* Object = Node->getObject();
 	DzShape* Shape = Object ? Object->getCurrentShape() : NULL;
 	DzGeometry* Geometry = Shape ? Shape->getGeometry() : NULL;
